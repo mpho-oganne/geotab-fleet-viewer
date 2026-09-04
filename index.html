@@ -1,0 +1,399 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Geotab Fleet Viewer</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --ink:#1c2330; --muted:#66707f; --line:#e1e5ea; --accent:#0b62d6; --bad:#b42318; --ok:#087443; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--ink); }
+  header { background:#0f1b2d; color:#fff; padding:14px 22px; display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
+  header h1 { font-size:18px; margin:0; font-weight:600; }
+  header .who { margin-left:auto; color:#b8c4d6; font-size:13px; display:flex; gap:10px; align-items:center; }
+  main { max-width:1280px; margin:0 auto; padding:18px 22px; display:grid; gap:18px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:16px; }
+  .card h2 { margin:0 0 10px; font-size:15px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:12px; }
+  .stat { border:1px solid var(--line); border-radius:6px; padding:10px 12px; }
+  .stat .k { color:var(--muted); font-size:12px; }
+  .stat .v { font-size:20px; font-weight:600; margin-top:2px; word-break:break-all; }
+  form.login { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:10px; align-items:end; }
+  label { display:grid; gap:4px; font-size:12px; color:var(--muted); }
+  input, select, textarea { font:inherit; padding:7px 9px; border:1px solid #c5ccd6; border-radius:6px; width:100%; }
+  textarea { font-family:ui-monospace,Consolas,monospace; font-size:12px; min-height:90px; }
+  button { font:inherit; padding:8px 14px; border-radius:6px; border:1px solid var(--accent); background:var(--accent); color:#fff; cursor:pointer; }
+  button.secondary { background:#fff; color:var(--accent); }
+  button:disabled { opacity:.55; cursor:default; }
+  .msg { padding:8px 10px; border-radius:6px; font-size:13px; }
+  .msg.err { background:#fdecea; color:var(--bad); }
+  .msg.ok { background:#e6f4ec; color:var(--ok); }
+  .msg.info { background:#eef3fb; color:#234; }
+  .explorer { display:grid; grid-template-columns:230px 1fr; gap:16px; }
+  @media (max-width:800px) { .explorer { grid-template-columns:1fr; } }
+  .types { display:flex; flex-direction:column; gap:4px; max-height:70vh; overflow:auto; }
+  .types button { text-align:left; background:#fff; color:var(--ink); border:1px solid var(--line); padding:7px 10px; }
+  .types button.active { border-color:var(--accent); background:#eef3fb; color:var(--accent); }
+  .toolbar { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:10px; }
+  .tablewrap { overflow:auto; border:1px solid var(--line); border-radius:6px; max-height:65vh; }
+  table { border-collapse:collapse; width:100%; font-size:12.5px; }
+  th, td { text-align:left; padding:6px 9px; border-bottom:1px solid var(--line); white-space:nowrap; max-width:360px; overflow:hidden; text-overflow:ellipsis; vertical-align:top; }
+  th { position:sticky; top:0; background:#f0f3f7; font-weight:600; cursor:pointer; }
+  tr:hover td { background:#fafbfd; }
+  pre { background:#0f1b2d; color:#dfe7f3; padding:12px; border-radius:6px; overflow:auto; max-height:65vh; font-size:12px; margin:0; }
+  .hint { color:var(--muted); font-size:12.5px; }
+  a { color:var(--accent); }
+  [hidden] { display:none !important; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Geotab Fleet Viewer</h1>
+  <span class="hint" style="color:#b8c4d6">Live data from the MyGeotab JSON-RPC API</span>
+  <div class="who">
+    <span id="who"></span>
+    <button id="logout" class="secondary" hidden>Sign out</button>
+  </div>
+</header>
+
+<main>
+  <section class="card">
+    <h2>Server (no sign-in required)</h2>
+    <div class="grid" id="public-stats"><div class="hint">Loading…</div></div>
+  </section>
+
+  <section class="card" id="login-card">
+    <h2>Sign in to a MyGeotab database</h2>
+    <p class="hint">Credentials go straight from your browser to Geotab. Nothing is stored except the session token, which stays in this tab.
+      No database yet? <a href="https://my.geotab.com/registration.html" target="_blank" rel="noopener">Register a free test database</a>.</p>
+    <form class="login" id="login">
+      <label>Server <input name="server" value="my.geotab.com" autocomplete="off"></label>
+      <label>Database <input name="database" required autocomplete="off"></label>
+      <label>Username (email) <input name="userName" type="email" required autocomplete="username"></label>
+      <label>Password <input name="password" type="password" required autocomplete="current-password"></label>
+      <button type="submit" id="login-btn">Sign in</button>
+    </form>
+    <div id="login-msg" style="margin-top:10px"></div>
+  </section>
+
+  <section class="card" id="counts-card" hidden>
+    <h2>Fleet at a glance</h2>
+    <div class="grid" id="counts"></div>
+  </section>
+
+  <section class="card explorer" id="explorer" hidden>
+    <div>
+      <h2>Entity types</h2>
+      <div class="types" id="types"></div>
+    </div>
+    <div>
+      <h2 id="result-title">Results</h2>
+      <div class="toolbar">
+        <label style="width:110px">Limit <select id="limit"><option>25</option><option selected>100</option><option>500</option><option>1000</option></select></label>
+        <label style="width:150px" id="range-wrap">Look back <select id="range"><option value="1">1 hour</option><option value="24" selected>24 hours</option><option value="168">7 days</option><option value="720">30 days</option></select></label>
+        <label style="flex:1;min-width:160px">Filter rows <input id="filter" placeholder="type to filter…"></label>
+        <button id="refresh" class="secondary">Refresh</button>
+        <button id="view-toggle" class="secondary">Show JSON</button>
+      </div>
+      <div id="result-msg"></div>
+      <div id="result"></div>
+    </div>
+  </section>
+
+  <section class="card" id="custom-card" hidden>
+    <h2>Custom API call</h2>
+    <p class="hint">Any method from the <a href="https://developers.geotab.com/myGeotab/apiReference/methods/" target="_blank" rel="noopener">method reference</a>. Session credentials are added automatically.</p>
+    <div style="display:grid;grid-template-columns:200px 1fr auto;gap:10px;align-items:start">
+      <label>Method <input id="c-method" value="Get"></label>
+      <label>Params (JSON) <textarea id="c-params">{ "typeName": "Device", "resultsLimit": 10 }</textarea></label>
+      <button id="c-run" style="margin-top:18px">Run</button>
+    </div>
+    <div id="c-msg" style="margin-top:10px"></div>
+    <pre id="c-out" hidden></pre>
+  </section>
+</main>
+
+<script>
+(() => {
+  const $ = (s) => document.querySelector(s);
+  const SESSION_KEY = 'geotab.session';
+
+  // ---- JSON-RPC transport -------------------------------------------------
+  async function rpc(server, method, params) {
+    const res = await fetch('https://' + server + '/apiv1', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ method: method, params: params || {} })
+    });
+    const body = await res.json();
+    if (body.error) {
+      const e = new Error(body.error.message || 'API error');
+      e.name = (body.error.data && body.error.data.type) || body.error.name || 'JSONRPCError';
+      throw e;
+    }
+    return body.result;
+  }
+
+  let session = null; // { server, credentials:{database,userName,sessionId} }
+  try { session = JSON.parse(sessionStorage.getItem(SESSION_KEY) || 'null'); } catch (e) { session = null; }
+
+  function call(method, params) {
+    if (!session) return Promise.reject(new Error('Not signed in'));
+    return rpc(session.server, method, Object.assign({}, params, { credentials: session.credentials }));
+  }
+  function multiCall(calls) {
+    return call('ExecuteMultiCall', { calls: calls });
+  }
+
+  function setMsg(el, text, kind) {
+    el.innerHTML = '';
+    if (!text) return;
+    const d = document.createElement('div'); d.className = 'msg ' + (kind || 'info'); d.textContent = text; el.append(d);
+  }
+  function stat(k, v) {
+    const d = document.createElement('div'); d.className = 'stat';
+    const kk = document.createElement('div'); kk.className = 'k'; kk.textContent = k;
+    const vv = document.createElement('div'); vv.className = 'v'; vv.textContent = v;
+    d.append(kk, vv); return d;
+  }
+  function currentServer() {
+    return ($('#login [name=server]').value || 'my.geotab.com').trim().replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+  }
+
+  // ---- Public, unauthenticated data ---------------------------------------
+  async function loadPublic() {
+    const box = $('#public-stats');
+    const server = currentServer();
+    box.innerHTML = '';
+    try {
+      const r = await Promise.all([
+        rpc(server, 'GetVersion'),
+        rpc(server, 'GetVersionInformation'),
+        rpc(server, 'GetLanguages'),
+        rpc(server, 'GetTimeZones'),
+        rpc(server, 'GetRegions')
+      ]);
+      const version = r[0], info = r[1], langs = r[2], tzs = r[3], regions = r[4];
+      box.append(
+        stat('Server', server),
+        stat('Server version', version),
+        stat('goTalk protocol', info.goTalk),
+        stat('Database version', info.database),
+        stat('Build branch', (info.application && info.application.branch) || '—'),
+        stat('Languages', langs.length),
+        stat('Time zones', tzs.length),
+        stat('Regions', regions.length)
+      );
+    } catch (e) {
+      box.innerHTML = '';
+      const m = document.createElement('div'); setMsg(m, 'Could not reach ' + server + ': ' + e.message, 'err'); box.append(m);
+    }
+  }
+
+  // ---- Auth -----------------------------------------------------------------
+  $('#login').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const f = new FormData(ev.target);
+    const server = currentServer();
+    const btn = $('#login-btn'); btn.disabled = true;
+    setMsg($('#login-msg'), 'Authenticating…', 'info');
+    try {
+      const result = await rpc(server, 'Authenticate', {
+        database: String(f.get('database')).trim(), userName: String(f.get('userName')).trim(), password: f.get('password')
+      });
+      const path = result.path && result.path !== 'ThisServer' ? result.path : server;
+      session = { server: path, credentials: result.credentials };
+      sessionStorage.setItem(SESSION_KEY, JSON.stringify(session));
+      ev.target.reset(); $('#login [name=server]').value = server;
+      setMsg($('#login-msg'), '', '');
+      await enterApp();
+    } catch (e) {
+      setMsg($('#login-msg'), e.name + ': ' + e.message, 'err');
+    } finally { btn.disabled = false; }
+  });
+
+  $('#logout').addEventListener('click', () => {
+    session = null; sessionStorage.removeItem(SESSION_KEY); location.reload();
+  });
+
+  function expireSession(e) {
+    if (e && /InvalidUserException|Session|credentials/i.test(e.name + ' ' + e.message)) {
+      session = null; sessionStorage.removeItem(SESSION_KEY);
+      $('#explorer').hidden = true; $('#counts-card').hidden = true; $('#custom-card').hidden = true;
+      $('#login-card').hidden = false; $('#logout').hidden = true; $('#who').textContent = '';
+      setMsg($('#login-msg'), 'Session expired. Please sign in again.', 'err');
+      return true;
+    }
+    return false;
+  }
+
+  // ---- Entity catalogue -----------------------------------------------------
+  const hoursAgoIso = (h) => new Date(Date.now() - h * 3600e3).toISOString();
+  const dated = (h) => ({ fromDate: hoursAgoIso(h), toDate: new Date().toISOString() });
+  const TYPES = [
+    { name: 'Device', label: 'Devices (vehicles)' },
+    { name: 'DeviceStatusInfo', label: 'Live status & position' },
+    { name: 'User', label: 'Users' },
+    { name: 'User', label: 'Drivers', search: () => ({ isDriver: true }) },
+    { name: 'Group', label: 'Groups' },
+    { name: 'Zone', label: 'Zones' },
+    { name: 'ZoneType', label: 'Zone types' },
+    { name: 'Trip', label: 'Trips', dated: true },
+    { name: 'LogRecord', label: 'GPS log records', dated: true },
+    { name: 'ExceptionEvent', label: 'Exception events', dated: true },
+    { name: 'Rule', label: 'Rules' },
+    { name: 'FaultData', label: 'Engine faults', dated: true },
+    { name: 'StatusData', label: 'Status data', dated: true },
+    { name: 'Diagnostic', label: 'Diagnostics' },
+    { name: 'Controller', label: 'Controllers' },
+    { name: 'Trailer', label: 'Trailers' },
+    { name: 'FuelTransaction', label: 'Fuel transactions', dated: true },
+    { name: 'DutyStatusLog', label: 'HOS duty status logs', dated: true },
+    { name: 'Route', label: 'Routes' },
+    { name: 'WorkTime', label: 'Work times' },
+    { name: 'UnitOfMeasure', label: 'Units of measure' },
+    { name: 'Audit', label: 'Audit log', dated: true },
+    { name: 'CustomData', label: 'Custom data', dated: true },
+    { name: 'DebugData', label: 'Debug data', dated: true },
+    { name: 'TextMessage', label: 'Text messages', dated: true },
+    { name: 'DVIRLog', label: 'DVIR logs', dated: true },
+    { name: 'Recipient', label: 'Notification recipients' },
+    { name: 'DistributionList', label: 'Distribution lists' }
+  ];
+  let active = null, lastRows = [], showJson = false, sortKey = null, sortDir = 1;
+
+  function buildTypes() {
+    const box = $('#types'); box.innerHTML = '';
+    TYPES.forEach((t) => {
+      const b = document.createElement('button'); b.textContent = t.label;
+      b.addEventListener('click', () => { active = t; sortKey = null; highlight(); loadType(); });
+      t.btn = b; box.append(b);
+    });
+  }
+  function highlight() {
+    TYPES.forEach((t) => t.btn.classList.toggle('active', t === active));
+    $('#range-wrap').style.visibility = active && active.dated ? 'visible' : 'hidden';
+    $('#result-title').textContent = active ? active.label : 'Results';
+  }
+
+  async function loadType() {
+    if (!active) return;
+    const typeName = active.name;
+    const params = { typeName: typeName, resultsLimit: Number($('#limit').value) };
+    let search = active.search ? active.search() : {};
+    if (active.dated) search = Object.assign({}, search, dated(Number($('#range').value)));
+    if (Object.keys(search).length) params.search = search;
+    setMsg($('#result-msg'), 'Loading ' + active.label + '…', 'info');
+    $('#result').innerHTML = '';
+    try {
+      const t0 = performance.now();
+      const rows = await call('Get', params);
+      lastRows = Array.isArray(rows) ? rows : [rows];
+      const n = lastRows.length;
+      setMsg($('#result-msg'), n + ' ' + typeName + ' record' + (n === 1 ? '' : 's') + ' in ' + Math.round(performance.now() - t0) + ' ms' +
+        (n >= params.resultsLimit ? ' (limit reached; raise the limit for more)' : ''), 'ok');
+      render();
+    } catch (e) {
+      if (!expireSession(e)) setMsg($('#result-msg'), e.name + ': ' + e.message, 'err');
+    }
+  }
+
+  // ---- Rendering --------------------------------------------------------------
+  function cellText(v) {
+    if (v == null) return '';
+    if (typeof v !== 'object') return String(v);
+    if (Array.isArray(v)) return v.length ? v.map(cellText).join(', ') : '';
+    if ('id' in v && Object.keys(v).length <= 2) return v.name ? v.name + ' (' + v.id + ')' : String(v.id);
+    if ('x' in v && 'y' in v) return v.y + ', ' + v.x;
+    return JSON.stringify(v);
+  }
+  function columns(rows) {
+    const seen = new Map();
+    rows.forEach((r) => Object.keys(r || {}).forEach((k) => seen.set(k, (seen.get(k) || 0) + 1)));
+    const pref = ['id', 'name', 'serialNumber', 'firstName', 'lastName', 'device', 'driver', 'dateTime', 'start', 'stop', 'latitude', 'longitude', 'speed', 'distance'];
+    return Array.from(seen.keys()).sort((a, b) => {
+      const pa = pref.indexOf(a), pb = pref.indexOf(b);
+      if (pa !== -1 || pb !== -1) return (pa === -1 ? 99 : pa) - (pb === -1 ? 99 : pb);
+      return seen.get(b) - seen.get(a) || a.localeCompare(b);
+    });
+  }
+  function render() {
+    const out = $('#result'); out.innerHTML = '';
+    const q = $('#filter').value.trim().toLowerCase();
+    let rows = lastRows;
+    if (q) rows = rows.filter((r) => JSON.stringify(r).toLowerCase().includes(q));
+    if (showJson) {
+      const pre = document.createElement('pre'); pre.textContent = JSON.stringify(rows, null, 2); out.append(pre); return;
+    }
+    if (!rows.length) { out.innerHTML = '<p class="hint">No rows.</p>'; return; }
+    const cols = columns(rows);
+    if (sortKey) rows = rows.slice().sort((a, b) => cellText(a[sortKey]).localeCompare(cellText(b[sortKey]), undefined, { numeric: true }) * sortDir);
+    const wrap = document.createElement('div'); wrap.className = 'tablewrap';
+    const table = document.createElement('table');
+    const thead = table.createTHead().insertRow();
+    cols.forEach((c) => {
+      const th = document.createElement('th'); th.textContent = c + (sortKey === c ? (sortDir > 0 ? ' ▲' : ' ▼') : '');
+      th.addEventListener('click', () => { sortDir = sortKey === c ? -sortDir : 1; sortKey = c; render(); });
+      thead.append(th);
+    });
+    const tbody = table.createTBody();
+    rows.forEach((r) => {
+      const tr = tbody.insertRow();
+      cols.forEach((c) => { const td = tr.insertCell(); const txt = cellText(r[c]); td.textContent = txt; if (txt.length > 40) td.title = txt; });
+    });
+    wrap.append(table); out.append(wrap);
+  }
+  $('#filter').addEventListener('input', render);
+  $('#refresh').addEventListener('click', loadType);
+  $('#limit').addEventListener('change', loadType);
+  $('#range').addEventListener('change', loadType);
+  $('#view-toggle').addEventListener('click', (e) => { showJson = !showJson; e.target.textContent = showJson ? 'Show table' : 'Show JSON'; render(); });
+
+  // ---- Counts dashboard -------------------------------------------------------
+  async function loadCounts() {
+    const box = $('#counts'); box.innerHTML = '<div class="hint">Counting…</div>';
+    const names = ['Device', 'User', 'Group', 'Zone', 'Rule', 'Trailer', 'Diagnostic', 'Route'];
+    try {
+      const r = await Promise.all([
+        multiCall(names.map((typeName) => ({ method: 'GetCountOf', params: { typeName: typeName } }))),
+        call('GetSystemTimeUtc')
+      ]);
+      const counts = r[0], now = r[1];
+      box.innerHTML = '';
+      names.forEach((n, i) => box.append(stat(n + 's', counts[i])));
+      box.append(stat('Server time (UTC)', new Date(now).toISOString().replace('T', ' ').slice(0, 19)));
+    } catch (e) {
+      if (!expireSession(e)) { box.innerHTML = ''; const m = document.createElement('div'); setMsg(m, e.name + ': ' + e.message, 'err'); box.append(m); }
+    }
+  }
+
+  // ---- Custom call ----------------------------------------------------------------
+  $('#c-run').addEventListener('click', async () => {
+    const out = $('#c-out'); out.hidden = true;
+    let params;
+    try { params = JSON.parse($('#c-params').value || '{}'); } catch (e) { setMsg($('#c-msg'), 'Params is not valid JSON: ' + e.message, 'err'); return; }
+    setMsg($('#c-msg'), 'Running…', 'info');
+    try {
+      const r = await call($('#c-method').value.trim(), params);
+      setMsg($('#c-msg'), Array.isArray(r) ? r.length + ' items' : 'OK', 'ok');
+      out.textContent = JSON.stringify(r, null, 2); out.hidden = false;
+    } catch (e) { if (!expireSession(e)) setMsg($('#c-msg'), e.name + ': ' + e.message, 'err'); }
+  });
+
+  // ---- Boot -------------------------------------------------------------------------
+  async function enterApp() {
+    $('#login-card').hidden = true;
+    $('#counts-card').hidden = false; $('#explorer').hidden = false; $('#custom-card').hidden = false;
+    $('#logout').hidden = false;
+    $('#who').textContent = session.credentials.userName + ' @ ' + session.credentials.database + ' (' + session.server + ')';
+    buildTypes();
+    active = TYPES[0]; highlight();
+    await Promise.all([loadCounts(), loadType()]);
+  }
+  loadPublic();
+  $('#login [name=server]').addEventListener('change', loadPublic);
+  if (session && session.credentials) enterApp();
+})();
+</script>
+</body>
+</html>
